@@ -5,6 +5,10 @@ from selenium.webdriver.common.by import By
 from dotenv import load_dotenv
 from google import genai  # Usando apenas a biblioteca nova
 
+##--- libraries to send e-mail
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 # Carregar variáveis de ambiente
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
@@ -116,12 +120,52 @@ def iniciar_agente_vagas():
     driver.quit()
     return vagas_aprovadas
 
+
+def enviar_email(vagas):
+    meu_email = os.getenv("EMAIL_USER")
+    minha_senha = os.getenv("EMAIL_PASS")
+    destinatario = meu_email
+
+    if not vagas:
+        print("Sem vagas novas para enviar.")
+        return
+
+    corpo_html = "<h2>🚀 Novas Vagas de Data & Sports Encontradas</h2>"
+    corpo_html += "<p>O teu agente analisou o LinkedIn e selecionou estas oportunidades:</p><ul>"
+
+    for v in vagas:
+        corpo_html += f"<li><strong>{v['titulo']}</strong><br><a href='{v['link']}'>Ver no LinkedIn</a></li><br>"
+
+    corpo_html += "</ul><p>Boa sorte!</p>"
+
+    msg = MIMEMultipart()
+    msg['From'] = meu_email
+    msg['To'] = destinatario
+    msg['Subject'] = f"🎯 {len(vagas)} Novas Vagas (Data Analyst/Engineer)"
+    msg.attach(MIMEText(corpo_html, 'html'))
+
+    try:
+
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()  # Segurança
+        server.login(meu_email, minha_senha)
+        server.send_message(msg)
+        server.quit()
+        print("✉️ E-mail enviado com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao enviar e-mail: {e}")
+
+
 if __name__ == "__main__":
     vagas_finais = iniciar_agente_vagas()
 
     print("\n" + "=" * 30 + "\nRELATÓRIO FINAL\n" + "=" * 30)
+
     if not vagas_finais:
         print("Nenhuma vaga nova e relevante hoje.")
     else:
         for v in vagas_finais:
             print(f"🎯 {v['titulo']}\n🔗 {v['link']}\n")
+
+        # 2. Enviar por e-mail
+        enviar_email(vagas_finais)
