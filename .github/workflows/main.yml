@@ -1,7 +1,7 @@
 name: Job Agent Daily
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 9 * * *'  # Todos os dias às 09:00 UTC
   workflow_dispatch:      # Permite correr manualmente para testar
 
 jobs:
@@ -9,16 +9,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
-      
+          python-version: '3.11'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Install dependencies
         run: |
-          pip install undetected-chromedriver selenium google-generativeai python-dotenv
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          pip install selenium undetected-chromedriver google-genai python-dotenv
 
       - name: Run script
         env:

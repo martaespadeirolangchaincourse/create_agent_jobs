@@ -1,24 +1,21 @@
+import os
+import time
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
-import google.generativeai as genai
-import time
-import os
 from dotenv import load_dotenv
+from google import genai  # Usando apenas a biblioteca nova
 
-# Carregar variáveis de ambiente (API Key)
+# Carregar variáveis de ambiente
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 
 if not api_key:
     api_key = os.environ.get("GOOGLE_API_KEY")
 if not api_key:
-    raise ValueError("Erro: GOOGLE_API_KEY não encontrada! Verifica os Secrets ou o .env")
+    raise ValueError("Erro: GOOGLE_API_KEY não encontrada!")
 
-
-# 1. CONFIGURAÇÃO DA IA
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-1.5-flash')
-
+# 1. CONFIGURAÇÃO DA IA (Nova API do Google)
+client = genai.Client(api_key=api_key)
 
 def agente_decide_vaga(titulo, descricao):
     prompt = f"""
@@ -34,15 +31,16 @@ def agente_decide_vaga(titulo, descricao):
     Responde apenas com a palavra 'SIM' ou 'NAO'.
     """
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
         return "SIM" in response.text.strip().upper()
     except Exception as e:
         print(f"Erro na IA: {e}")
         return False
 
-
 def gerir_memoria_vagas(link):
-    """Verifica se o link já foi processado antes para não repetir."""
     ficheiro = "vagas_vistas.txt"
     if not os.path.exists(ficheiro):
         with open(ficheiro, "w") as f: pass
@@ -51,27 +49,32 @@ def gerir_memoria_vagas(link):
         vistas = f.read().splitlines()
 
     if link in vistas:
-        return True  # Já viu
+        return True
 
     with open(ficheiro, "a") as f:
         f.write(link + "\n")
-    return False  # É nova
-
+    return False
 
 def iniciar_agente_vagas():
-    options = uc.ChromeOptions()
-    options.add_argument("--headless")  # Necessário para o GitHub
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    #driver=uc.Chrome(options=options)
-    #driver = uc.Chrome(version_main=145)
-    if os.getenv("GITHUB_ACTIONS") == "true":
-        print("Ambiente GitHub detectado. A usar versão automática do Chrome.")
-        driver = uc.Chrome(options=options)
+    # Detectar ambiente
+    is_github = os.getenv("GITHUB_ACTIONS") == "true"
+
+    if is_github:
+        print("Ambiente GitHub detectado. Usando Selenium Standard.")
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=chrome_options)
     else:
-        # Se estiver no teu PC (Windows/Mac), usa a versão 145 que instalaste
-        print("Ambiente Local detectado. A usar Chrome v145.")
+        print("Ambiente Local detectado. Usando undetected-chromedriver v145.")
+        options = uc.ChromeOptions()
+        # No teu PC, podes querer ver o browser a abrir (comenta o headless se quiseres)
+        options.add_argument("--headless")
         driver = uc.Chrome(version_main=145, options=options)
+
     url_pesquisa = "https://www.linkedin.com/jobs/search/?keywords=Data%20Analyst%20Sports&location=Lisbon&f_WT=1%2C2"
 
     print("--- ETAPA 1: Recolhendo links ---")
@@ -86,11 +89,10 @@ def iniciar_agente_vagas():
             titulo = card.find_element(By.CLASS_NAME, "base-search-card__title").text
             link = card.find_element(By.TAG_NAME, "a").get_attribute("href")
 
-            # MEMÓRIA: Só avança se o link for novo
             if not gerir_memoria_vagas(link):
                 vagas_para_analisar.append({"titulo": titulo, "link": link})
             else:
-                print(f"⏭️ Ignorada (já analisada anteriormente): {titulo}")
+                print(f"⏭️ Ignorada (repetida): {titulo}")
         except:
             continue
 
@@ -114,7 +116,6 @@ def iniciar_agente_vagas():
     driver.quit()
     return vagas_aprovadas
 
-
 if __name__ == "__main__":
     vagas_finais = iniciar_agente_vagas()
 
@@ -124,5 +125,3 @@ if __name__ == "__main__":
     else:
         for v in vagas_finais:
             print(f"🎯 {v['titulo']}\n🔗 {v['link']}\n")
-
-    # Aqui podes chamar a tua função de e-mail no final
