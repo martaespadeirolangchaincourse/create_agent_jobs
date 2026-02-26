@@ -3,169 +3,165 @@ import time
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from dotenv import load_dotenv
-from google import genai  # Usando apenas a biblioteca nova
-
-##--- libraries to send e-mail
+from google import genai
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-# Carregar variáveis de ambiente
-load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
 
-if not api_key:
-    api_key = os.environ.get("GOOGLE_API_KEY")
+# --- CONFIGURAÇÃO INICIAL ---
+load_dotenv()
+api_key = os.getenv("GOOGLE_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 if not api_key:
     raise ValueError("Erro: GOOGLE_API_KEY não encontrada!")
 
-# 1. CONFIGURAÇÃO DA IA (Nova API do Google)
 client = genai.Client(api_key=api_key)
 
-def agente_decide_vaga(titulo, descricao):
-    prompt = f"""
-    És um assistente de carreira. Analisa a vaga abaixo:
-    Título: {titulo}
-    Descrição: {descricao[:2000]} 
+EMPRESAS_TARGET = {
+    "Netflix": "https://explore.jobs.netflix.net/careers?query=Data",
+    "Uber": "https://www.uber.com/pt/pt/careers/teams/data-science/",
+    "Spotify": "https://www.lifeatspotify.com/jobs?q=Data",
+    "Airbnb": "https://careers.airbnb.com/positions/",
+    "Booking": "https://careers.booking.com/search-results/?q=Data",
+    "Google": "https://www.google.com/about/careers/applications/jobs/results?q=Data",
+    "Amazon": "https://www.amazon.jobs/en/search?base_query=data+scientist",
+    "Critical TechWorks": "https://join.criticaltechworks.com/jobs",
+    "Glovo": "https://jobs.glovoapp.com/departments/data/",
+    "Mercedes-Benz.io": "https://www.mercedes-benz.io/jobs",
+    "VW Digital Solutions": "https://jobs.volkswagen-group.com/VWGDS/?locale=en_US"
+}
 
-    Critérios de aprovação (Responde 'SIM' se cumprir UM deles):
-    1. A vaga é para Data Analyst ou Data Scientist especificamente no setor do DESPORTO (futebol, clubes, performance).
-    2. A vaga é para Junior Data Engineer (pode ser em qualquer área).
 
-    Se for uma vaga de Data Analyst que NÃO seja de desporto, responde 'NAO'.
-    Responde apenas com a palavra 'SIM' ou 'NAO'.
-    """
-    try:
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
-        return "SIM" in response.text.strip().upper()
-    except Exception as e:
-        print(f"Erro na IA: {e}")
-        return False
+# --- FUNÇÕES DE APOIO ---
 
 def gerir_memoria_vagas(link):
     ficheiro = "vagas_vistas.txt"
     if not os.path.exists(ficheiro):
         with open(ficheiro, "w") as f: pass
-
     with open(ficheiro, "r") as f:
         vistas = f.read().splitlines()
-
     if link in vistas:
         return True
-
     with open(ficheiro, "a") as f:
         f.write(link + "\n")
     return False
 
-def iniciar_agente_vagas():
-    # Detectar ambiente
-    is_github = os.getenv("GITHUB_ACTIONS") == "true"
 
+def agente_decide_vaga(titulo, descricao):
+    prompt = f"Analisa a vaga: {titulo}. Descrição: {descricao[:2000]}. Responde SIM se for Data Analyst/Scientist em DESPORTO ou Junior Data Engineer. Caso contrário, responde NAO. Responde apenas SIM ou NAO."
+    try:
+        response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        return "SIM" in response.text.strip().upper()
+    except:
+        return False
+
+
+def enviar_email(vagas):
+    meu_email = os.getenv("EMAIL_USER")
+    minha_senha = os.getenv("EMAIL_PASS")
+    if not vagas or not meu_email: return
+
+    corpo = "<h2>🚀 Novas Vagas Encontradas</h2><ul>"
+    for v in vagas:
+        corpo += f"<li><strong>{v['titulo']}</strong> - <a href='{v['link']}'>Link</a></li>"
+    corpo += "</ul>"
+
+    msg = MIMEMultipart()
+    msg['Subject'] = f"🎯 {len(vagas)} Novas Vagas Tech/Sports"
+    msg['From'] = meu_email
+    msg['To'] = meu_email
+    msg.attach(MIMEText(corpo, 'html'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(meu_email, minha_senha)
+        server.send_message(msg)
+        server.quit()
+        print("✉️ E-mail enviado!")
+    except Exception as e:
+        print(f"Erro e-mail: {e}")
+
+
+# --- FUNÇÕES DE SCRAPING ---
+
+def configurar_driver():
+    is_github = os.getenv("GITHUB_ACTIONS") == "true"
     if is_github:
-        print("Ambiente GitHub detectado. Usando Selenium Standard.")
         from selenium import webdriver
         from selenium.webdriver.chrome.options import Options
         chrome_options = Options()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(options=chrome_options)
+        return webdriver.Chrome(options=chrome_options)
     else:
-        print("Ambiente Local detectado. Usando undetected-chromedriver v145.")
         options = uc.ChromeOptions()
-        # No teu PC, podes querer ver o browser a abrir (comenta o headless se quiseres)
         options.add_argument("--headless")
-        driver = uc.Chrome(version_main=145, options=options)
+        return uc.Chrome(version_main=145, options=options)
 
-    url_pesquisa = "https://www.linkedin.com/jobs/search/?keywords=Data%20Analyst%20Sports&location=Lisbon&f_WT=1%2C2"
 
-    print("--- ETAPA 1: Recolhendo links ---")
-    driver.get(url_pesquisa)
+def procurar_linkedin(driver):
+    vagas_aprovadas = []
+    url = "https://www.linkedin.com/jobs/search/?keywords=Data%20Analyst%20Sports&location=Lisbon&f_WT=1%2C2"
+    print("--- ETAPA 1: LinkedIn ---")
+    driver.get(url)
     time.sleep(6)
-
     cards = driver.find_elements(By.CLASS_NAME, "base-card")
-    vagas_para_analisar = []
 
     for card in cards[:10]:
         try:
             titulo = card.find_element(By.CLASS_NAME, "base-search-card__title").text
             link = card.find_element(By.TAG_NAME, "a").get_attribute("href")
-
             if not gerir_memoria_vagas(link):
-                vagas_para_analisar.append({"titulo": titulo, "link": link})
-            else:
-                print(f"⏭️ Ignorada (repetida): {titulo}")
+                # Vai ao detalhe da vaga
+                driver.get(link)
+                time.sleep(3)
+                desc = driver.find_element(By.TAG_NAME, "body").text
+                if agente_decide_vaga(titulo, desc):
+                    vagas_aprovadas.append({"titulo": f"[LinkedIn] {titulo}", "link": link})
         except:
             continue
-
-    vagas_aprovadas = []
-    print(f"\n--- ETAPA 2: Análise IA de {len(vagas_para_analisar)} novas vagas ---")
-
-    for vaga in vagas_para_analisar:
-        print(f"🧐 Analisando: {vaga['titulo']}...")
-        driver.get(vaga['link'])
-        time.sleep(4)
-        try:
-            corpo_texto = driver.find_element(By.TAG_NAME, "body").text
-            if agente_decide_vaga(vaga['titulo'], corpo_texto):
-                print(f"✅ APROVADA")
-                vagas_aprovadas.append(vaga)
-            else:
-                print(f"❌ REJEITADA")
-        except Exception as e:
-            print(f"Erro: {e}")
-
-    driver.quit()
     return vagas_aprovadas
 
 
-def enviar_email(vagas):
-    meu_email = os.getenv("EMAIL_USER")
-    minha_senha = os.getenv("EMAIL_PASS")
-    destinatario = meu_email
+def verificar_sites_diretos(driver):
+    vagas_encontradas = []
+    print("\n--- ETAPA 2: Sites Oficiais ---")
+    for empresa, url in EMPRESAS_TARGET.items():
+        try:
+            print(f"🌐 {empresa}...")
+            driver.get(url)
+            time.sleep(5)
+            texto = driver.find_element(By.TAG_NAME, "body").text
+            prompt = f"Analisa o texto de carreiras da {empresa}. Se houver vagas de Data Analyst ou Data Engineer, lista-as no formato: Titulo | Link. Se não houver, responde NADA. Texto: {texto[:4000]}"
+            response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+            res = response.text.strip()
+            if "NADA" not in res.upper():
+                for linha in res.split('\n'):
+                    if "|" in linha:
+                        t, l = linha.split("|")
+                        if not gerir_memoria_vagas(l.strip()):
+                            vagas_encontradas.append({"titulo": f"[{empresa}] {t.strip()}", "link": l.strip()})
+        except:
+            continue
+    return vagas_encontradas
 
-    if not vagas:
-        print("Sem vagas novas para enviar.")
-        return
 
-    corpo_html = "<h2>🚀 Novas Vagas de Data & Sports Encontradas</h2>"
-    corpo_html += "<p>O teu agente analisou o LinkedIn e selecionou estas oportunidades:</p><ul>"
-
-    for v in vagas:
-        corpo_html += f"<li><strong>{v['titulo']}</strong><br><a href='{v['link']}'>Ver no LinkedIn</a></li><br>"
-
-    corpo_html += "</ul><p>Boa sorte!</p>"
-
-    msg = MIMEMultipart()
-    msg['From'] = meu_email
-    msg['To'] = destinatario
-    msg['Subject'] = f"🎯 {len(vagas)} Novas Vagas (Data Analyst/Engineer)"
-    msg.attach(MIMEText(corpo_html, 'html'))
-
-    try:
-
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()  # Segurança
-        server.login(meu_email, minha_senha)
-        server.send_message(msg)
-        server.quit()
-        print("✉️ E-mail enviado com sucesso!")
-    except Exception as e:
-        print(f"❌ Erro ao enviar e-mail: {e}")
-
+# --- EXECUÇÃO ---
 
 if __name__ == "__main__":
-    vagas_finais = iniciar_agente_vagas()
+    browser = configurar_driver()
 
-    print("\n" + "=" * 30 + "\nRELATÓRIO FINAL\n" + "=" * 30)
+    # Executa as duas fontes
+    lista_linkedin = procurar_linkedin(browser)
+    lista_direta = verificar_sites_diretos(browser)
 
-    if not vagas_finais:
-        print("Nenhuma vaga nova e relevante hoje.")
+    total_vagas = lista_linkedin + lista_direta
+
+    browser.quit()
+
+    print(f"\nTotal de novas vagas: {len(total_vagas)}")
+    if total_vagas:
+        enviar_email(total_vagas)
     else:
-        for v in vagas_finais:
-            print(f"🎯 {v['titulo']}\n🔗 {v['link']}\n")
-
-        # 2. Enviar por e-mail
-        enviar_email(vagas_finais)
+        print("Nada de novo hoje.")
