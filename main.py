@@ -63,7 +63,15 @@ def iniciar_agente_vagas():
     options.add_argument("--headless")  # Necessário para o GitHub
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    driver = uc.Chrome(version_main=145)
+    #driver=uc.Chrome(options=options)
+    #driver = uc.Chrome(version_main=145)
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        print("Ambiente GitHub detectado. A usar versão automática do Chrome.")
+        driver = uc.Chrome(options=options)
+    else:
+        # Se estiver no teu PC (Windows/Mac), usa a versão 145 que instalaste
+        print("Ambiente Local detectado. A usar Chrome v145.")
+        driver = uc.Chrome(version_main=145, options=options)
     url_pesquisa = "https://www.linkedin.com/jobs/search/?keywords=Data%20Analyst%20Sports&location=Lisbon&f_WT=1%2C2"
 
     print("--- ETAPA 1: Recolhendo links ---")
