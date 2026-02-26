@@ -9,6 +9,12 @@ from dotenv import load_dotenv
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 
+if not api_key:
+    api_key = os.environ.get("GOOGLE_API_KEY")
+if not api_key:
+    raise ValueError("Erro: GOOGLE_API_KEY não encontrada! Verifica os Secrets ou o .env")
+
+
 # 1. CONFIGURAÇÃO DA IA
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-1.5-flash')
